@@ -1207,17 +1207,6 @@ body{background:radial-gradient(ellipse at 50% 38%,transparent 52%,rgba(0,0,0,.5
 }
 </script>
 <script>
-/* ===== QUEM PODE EDITAR =====
-   Mete aqui os emails (ou nomes de utilizador do GitHub) das pessoas com acesso de edição.
-   Exemplo: const EDITORS = ["joao@gmail.com", "maria-silva"];
-   Lista vazia = não há filtro (basta ter permissão de escrita no repositório).
-   NOTA: isto é só um filtro na interface. A segurança real é do GitHub:
-   a pessoa também tem de ser colaboradora do repositório e usar o seu próprio token. */
-const EDITORS = [
-  "miguel.paniagua2013@gmail.com"
-  "mpanyspam@gmail.com"
-];
-
 /* ===== GitHub: permissões, edição e gravação =====
    Se o site estiver em <owner>.github.io/<repo>/ isto é detetado sozinho.
    Com domínio próprio, preenche owner e repo aqui (e branch/path se não forem os padrão). */
@@ -1225,6 +1214,7 @@ const GH = (() => {
   const c = {owner:"", repo:"", branch:"", path:"index.html"};
   const h = location.hostname, seg = location.pathname.split("/").filter(Boolean);
   if(!c.owner && /\.github\.io$/.test(h)){ c.owner = h.split(".")[0]; c.repo = (seg[0] && !/\.html?$/.test(seg[0])) ? seg[0] : h; }
+  try{ const sv = (localStorage.getItem("gh_repo") || "").split("/"); if(!c.owner && sv[0] && sv[1]){ c.owner = sv[0]; c.repo = sv[1]; } }catch(e){}
   return c;
 })();
 const TOK_KEY = "gh_token";
@@ -1237,28 +1227,13 @@ async function gh(path, opt = {}){
   return r;
 }
 // Só quem tem escrita (collaborator com write/maintain/admin, ou dono) passa.
-async function inEditors(){
-  const L = EDITORS.map(x => String(x).trim().toLowerCase()).filter(Boolean);
-  if(!L.length) return true;
-  const H = {"Accept":"application/vnd.github+json","Authorization":"Bearer " + tok(),"X-GitHub-Api-Version":"2022-11-28"};
-  const ids = [];
-  try{
-    const u = await (await fetch("https://api.github.com/user", {headers:H})).json();
-    if(u.login) ids.push(u.login.toLowerCase());
-    if(u.email) ids.push(u.email.toLowerCase());
-  }catch(e){}
-  try{
-    const r = await fetch("https://api.github.com/user/emails", {headers:H});
-    if(r.ok) (await r.json()).forEach(m => m.email && ids.push(m.email.toLowerCase()));
-  }catch(e){}
-  return ids.some(i => L.includes(i));
-}
 async function checkAccess(){
-  if(!tok() || !GH.owner) return false;
+  if(!tok() || !GH.owner || !GH.repo) return false;
   try{
     const r = await (await gh("")).json();
-    if(!(r.permissions && (r.permissions.push || r.permissions.maintain || r.permissions.admin))) return false;
-    return await inEditors();
+    // Se o GitHub devolver permissões, exige escrita; se não devolver, aceita e a gravação valida.
+    if(r.permissions) return !!(r.permissions.push || r.permissions.maintain || r.permissions.admin);
+    return true;
   }catch(e){ if(e.status === 401) clearTok(); return false; }
 }
 const bytesToB64 = u => { let bin = ""; for(let i = 0; i < u.length; i += 0x8000) bin += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000)); return btoa(bin); };
@@ -1278,14 +1253,19 @@ const ghAssets = {
 };
 const setAssets = () => { ASSETS = canEdit ? ghAssets : null; };
 async function login(){
-  if(!GH.owner) return toast("Falta definir GH.owner e GH.repo no código.");
+  if(!GH.owner || !GH.repo){
+    const rp = (prompt("Repositório do site, no formato dono/repositório (ex.: joao/cidade-portuga):") || "").trim().replace(/^https?:\/\/github\.com\//, "").replace(/\.git$/, "").split("/");
+    if(!rp[0] || !rp[1]) return toast("Repositório inválido.");
+    GH.owner = rp[0]; GH.repo = rp[1];
+    try{ localStorage.setItem("gh_repo", rp[0] + "/" + rp[1]); }catch(e){}
+  }
   const t = (prompt("Cola o teu token do GitHub (fine-grained, só este repositório, permissão Contents: Read and write):") || "").trim();
   if(!t) return;
   try{ localStorage.setItem(TOK_KEY, t); }catch(e){ return toast("O browser bloqueou o armazenamento local."); }
   canEdit = await checkAccess();
-  if(!canEdit) clearTok();
+  if(!canEdit){ clearTok(); if(!/\.github\.io$/.test(location.hostname)){ try{ localStorage.removeItem("gh_repo"); }catch(e){} GH.owner = ""; GH.repo = ""; } }
   setAssets(); admin();
-  toast(canEdit ? "Sessão iniciada ✓" : "Esta conta não tem permissão de edição (repositório ou lista EDITORS).");
+  toast(canEdit ? "Sessão iniciada ✓" : "Token sem acesso a este repositório. Confirma dono/repo e a permissão Contents: Read and write.");
 }
 function logout(){ clearTok(); canEdit = false; ASSETS = null; editing = false; render(); }
 async function startEdit(){
