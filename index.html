@@ -1207,6 +1207,16 @@ body{background:radial-gradient(ellipse at 50% 38%,transparent 52%,rgba(0,0,0,.5
 }
 </script>
 <script>
+/* ===== QUEM PODE EDITAR =====
+   Mete aqui os emails (ou nomes de utilizador do GitHub) das pessoas com acesso de edição.
+   Exemplo: const EDITORS = ["joao@gmail.com", "maria-silva"];
+   Lista vazia = não há filtro (basta ter permissão de escrita no repositório).
+   NOTA: isto é só um filtro na interface. A segurança real é do GitHub:
+   a pessoa também tem de ser colaboradora do repositório e usar o seu próprio token. */
+const EDITORS = [
+  "miguel.paniagua2013@gmail.com"
+];
+
 /* ===== GitHub: permissões, edição e gravação =====
    Se o site estiver em <owner>.github.io/<repo>/ isto é detetado sozinho.
    Com domínio próprio, preenche owner e repo aqui (e branch/path se não forem os padrão). */
@@ -1226,11 +1236,28 @@ async function gh(path, opt = {}){
   return r;
 }
 // Só quem tem escrita (collaborator com write/maintain/admin, ou dono) passa.
+async function inEditors(){
+  const L = EDITORS.map(x => String(x).trim().toLowerCase()).filter(Boolean);
+  if(!L.length) return true;
+  const H = {"Accept":"application/vnd.github+json","Authorization":"Bearer " + tok(),"X-GitHub-Api-Version":"2022-11-28"};
+  const ids = [];
+  try{
+    const u = await (await fetch("https://api.github.com/user", {headers:H})).json();
+    if(u.login) ids.push(u.login.toLowerCase());
+    if(u.email) ids.push(u.email.toLowerCase());
+  }catch(e){}
+  try{
+    const r = await fetch("https://api.github.com/user/emails", {headers:H});
+    if(r.ok) (await r.json()).forEach(m => m.email && ids.push(m.email.toLowerCase()));
+  }catch(e){}
+  return ids.some(i => L.includes(i));
+}
 async function checkAccess(){
   if(!tok() || !GH.owner) return false;
   try{
     const r = await (await gh("")).json();
-    return !!(r.permissions && (r.permissions.push || r.permissions.maintain || r.permissions.admin));
+    if(!(r.permissions && (r.permissions.push || r.permissions.maintain || r.permissions.admin))) return false;
+    return await inEditors();
   }catch(e){ if(e.status === 401) clearTok(); return false; }
 }
 const bytesToB64 = u => { let bin = ""; for(let i = 0; i < u.length; i += 0x8000) bin += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000)); return btoa(bin); };
@@ -1257,7 +1284,7 @@ async function login(){
   canEdit = await checkAccess();
   if(!canEdit) clearTok();
   setAssets(); admin();
-  toast(canEdit ? "Sessão iniciada ✓" : "Esta conta não tem permissão de escrita neste repositório.");
+  toast(canEdit ? "Sessão iniciada ✓" : "Esta conta não tem permissão de edição (repositório ou lista EDITORS).");
 }
 function logout(){ clearTok(); canEdit = false; ASSETS = null; editing = false; render(); }
 async function startEdit(){
